@@ -1,0 +1,15 @@
+#!/bin/bash
+
+#
+# Copyright 2020 Sébastien Millet
+#
+
+set -euo pipefail
+
+#
+# TODO
+#   Detect whether it is /dev/ttyUSB0 or /dev/ttyACM0
+#
+
+./mapper-devusb -d -f /var/arduino -l mapper-devusb.log /dev/ttyUSB0
+
