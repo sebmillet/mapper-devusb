@@ -35,7 +35,7 @@
  * Should rather be set from Makefile
  * Left here, in case you'd need to bypass Makefile
 */
-#define DEBUG
+/*#define DEBUG*/
 
     // Send a noop instruction to Arduino every that many seconds
 #define KEEP_ALIVE_NOOP 60
