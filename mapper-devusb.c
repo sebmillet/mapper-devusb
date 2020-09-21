@@ -5,6 +5,25 @@
  *
  * Copyright 2019, 2020 Sébastien Millet
  *
+*/
+
+/*
+  This file is part of mapper-devusb.
+
+  mapper-devusb is free software: you can redistribute it and/or modify it under
+  the terms of the GNU General Public License as published by the Free Software
+  Foundation, either version 3 of the License, or (at your option) any later
+  version.
+
+  mapper-devusb is distributed in the hope that it will be useful, but WITHOUT
+  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+  FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+  You should have received a copy of the GNU General Public License along with
+  mapper-devusb. If not, see <https://www.gnu.org/licenses/>.
+*/
+
+/*
  * Provides a named pipe to send data to Arduino, controlling en passant the
  * HUPCL flag of Arduino'a device file.
  * This HUPCL flag control is performed to avoid an Arduino reset each time a
