@@ -6,7 +6,7 @@
 #
 
 AC_PREREQ([2.69])
-AC_INIT([mapper-devusb], [1.0], [milletseb@laposte.net])
+AC_INIT([mapper-devusb], [1.1], [milletseb@laposte.net])
 AC_CONFIG_SRCDIR([mapper-devusb.c])
 AC_CONFIG_AUX_DIR([admin])
 AC_CONFIG_HEADERS([config.h])
@@ -44,7 +44,7 @@ dnl ==================== fortified generation =======================
 
 AC_ARG_ENABLE(fortified,
               [  --enable-fortified      compilation with options to make running code more robust],
-              enable_fortified="$enableval", enable_fortified="no")
+              enable_fortified="$enableval", enable_fortified="yes")
 
 if test "${enable_fortified}" = yes ; then
     CFLAGS="$CFLAGS -Wunreachable-code -Wformat=2 -D_FORTIFY_SOURCE=2 \
