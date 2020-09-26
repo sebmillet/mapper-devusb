@@ -11,5 +11,5 @@ set -euo pipefail
 #   Detect whether it is /dev/ttyUSB0 or /dev/ttyACM0
 #
 
-./mapper-devusb -d -f /var/arduino -l mapper-devusb.log /dev/ttyUSB0
+./mapper-devusb -d -D -f /var/arduino -l /tmp/mapper-devusb.log /dev/ttyUSB0
 

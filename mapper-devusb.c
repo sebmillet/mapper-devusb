@@ -48,6 +48,10 @@
 #include <sys/time.h>
 #include <time.h>
 
+#ifdef HAVE_SYSTEMD
+#include <systemd/sd-daemon.h>
+#endif
+
 #include "serial_speed.h"
 
 /*
@@ -57,7 +61,8 @@
 /*#define DEBUG*/
 
     // Send a noop instruction to Arduino every that many seconds
-#define KEEP_ALIVE_NOOP 60
+#define KEEP_ALIVE_WHILE_SUCCESS 60
+#define KEEP_ALIVE_WHILE_FAILURE 5
     // Can result in a lot of repetitive logs
 #define LOG_NOOP
 
@@ -102,6 +107,7 @@ void DBG(const char *fmt, ...) {
     vfprintf(flog, fmt, args);
     va_end(args);
     fprintf(flog, "\n");
+    fflush(flog);
 }
 #else
 #define DBG(...)
@@ -116,6 +122,7 @@ void l(const char *fmt, ...) {
     vfprintf(flog, fmt, args);
     va_end(args);
     fprintf(flog, "\n");
+    fflush(flog);
 }
 
 void usage() {
@@ -180,32 +187,41 @@ int clear_hupcl(const int fd) {
     return 0;
 }
 
-void write_buf(char *buf, size_t len) {
+// Sends bytes to the device.
+// Returns 0 if success, -1 if failure.
+int write_buf(char *buf, size_t len) {
     int out_fd;
     if ((out_fd = open(dev_file_name, O_WRONLY)) == -1) {
         l("error: cannot open device file: %d (%s)",
             errno, strerror(errno));
-        return;
+        return -1;
     }
 
+    int retval = 0;
     do {
         if (clear_hupcl(out_fd)) {
             l("error: cannot clear HUPCL of "
                 "device file: %d (%s)", errno, strerror(errno));
+            retval = -1;
             break;
         }
 
-        if (!len)
+        if (!len) {
+            retval = -1;
             break;
+        }
 
         if (write(out_fd, buf, len) == -1) {
             l("error: write to device file: %d (%s)",
                 errno, strerror(errno));
+            retval = -1;
             break;
         }
     } while (0);
 
     close(out_fd);
+
+    return retval;
 }
 
     // From
@@ -217,16 +233,20 @@ static void skeleton_daemon() {
     pid = fork();
 
     /* An error occurred */
-    if (pid < 0)
+    if (pid < 0) {
+        l("fork() returned a negative value: error, pid=%u", getpid());
         exit(EXIT_FAILURE);
+    }
 
     /* Success: Let the parent terminate */
     if (pid > 0)
         exit(EXIT_SUCCESS);
 
     /* On success: The child process becomes session leader */
-    if (setsid() < 0)
+    if (setsid() < 0) {
+        l("setsid() returned a negative value: error, pid=%u", getpid());
         exit(EXIT_FAILURE);
+    }
 
     /* Catch, ignore and handle signals */
     //TODO: Implement a working signal handler */
@@ -237,8 +257,10 @@ static void skeleton_daemon() {
     pid = fork();
 
     /* An error occurred */
-    if (pid < 0)
+    if (pid < 0) {
+        l("second fork() returned a negative value: error, pid=%u", getpid());
         exit(EXIT_FAILURE);
+    }
 
     /* Success: Let the parent terminate */
     if (pid > 0)
@@ -249,8 +271,10 @@ static void skeleton_daemon() {
 
     /* Change the working directory to the root directory */
     /* or another appropriated directory */
-    if (chdir("/"))
+    if (chdir("/")) {
+        l("chdir() returned a negative value: error, pid=%u", getpid());
         exit(EXIT_FAILURE);
+    }
 
     /* Close all open file descriptors */
     close(0);
@@ -320,8 +344,6 @@ int main(int argc, char *argv[]) {
         setvbuf(flog, NULL, _IONBF, 0);
     }
 
-    atexit(exit_handler);
-
     l("start");
     DBG("device file:    [%s]", dev_file_name);
     DBG("fifo file name: [%s]", fifo_name);
@@ -351,18 +373,27 @@ int main(int argc, char *argv[]) {
     if (run_as_a_daemon)
         skeleton_daemon();
 
-    int loop = 1;
-    while (loop) {
+    atexit(exit_handler);
+
+#ifdef HAVE_SYSTEMD
+    sd_notify(0, "READY=1");
+#endif
+
+    int last_write_buf_result = -1;
+    while (1) {
         fd_set rfds;
         struct timeval tv;
         int retval;
 
         FD_ZERO(&rfds);
         FD_SET(fifo_fd, &rfds);
-        tv.tv_sec = KEEP_ALIVE_NOOP;
+        tv.tv_sec = (last_write_buf_result == 0 ?
+                       KEEP_ALIVE_WHILE_SUCCESS :
+                       KEEP_ALIVE_WHILE_FAILURE);
         tv.tv_usec = 0;
 
         retval = select(fifo_fd + 1, &rfds, NULL, NULL, &tv);
+
         if (retval == -1) {
             l("error: select: %d (%s)",
                 errno, strerror(errno));
@@ -371,7 +402,8 @@ int main(int argc, char *argv[]) {
 #ifdef LOG_NOOP
             l("sending noop()");
 #endif
-            write_buf("noop\n", 5);
+
+            last_write_buf_result = write_buf("noop\n", 5);
             continue;
         }
 
@@ -388,9 +420,9 @@ int main(int argc, char *argv[]) {
 
             if (!strncmp(buf, "EOF()", 5)) {
                 l("quitting");
-                loop = 0;
+                break;
             } else {
-                write_buf(buf, len);
+                last_write_buf_result = write_buf(buf, len);
             }
         }
     }

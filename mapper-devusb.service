@@ -1,0 +1,11 @@
+[Unit]
+Description=mapper-devusb daemon
+
+[Service]
+Type=simple
+User=www-data
+ExecStart=/usr/local/bin/mapper-devusb -D -f /var/arduino -l /var/log/mapper-devusb/activity.log /dev/ttyUSB0
+
+[Install]
+WantedBy=multi-user.target
+

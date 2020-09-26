@@ -90,6 +90,8 @@ NORMAL_UNINSTALL = :
 PRE_UNINSTALL = :
 POST_UNINSTALL = :
 bin_PROGRAMS = mapper-devusb$(EXEEXT)
+@HAVE_SYSTEMD_TRUE@am__append_1 = -DHAVE_SYSTEMD
+@HAVE_SYSTEMD_TRUE@am__append_2 = -lsystemd
 subdir = .
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/configure.ac
@@ -103,7 +105,8 @@ mkinstalldirs = $(install_sh) -d
 CONFIG_HEADER = config.h
 CONFIG_CLEAN_FILES =
 CONFIG_CLEAN_VPATH_FILES =
-am__installdirs = "$(DESTDIR)$(bindir)" "$(DESTDIR)$(docdir)"
+am__installdirs = "$(DESTDIR)$(bindir)" "$(DESTDIR)$(docdir)" \
+	"$(DESTDIR)$(systemdsystemunitdir)"
 PROGRAMS = $(bin_PROGRAMS)
 am_mapper_devusb_OBJECTS = mapper-devusb.$(OBJEXT)
 mapper_devusb_OBJECTS = $(am_mapper_devusb_OBJECTS)
@@ -171,7 +174,7 @@ am__uninstall_files_from_dir = { \
     || { echo " ( cd '$$dir' && rm -f" $$files ")"; \
          $(am__cd) "$$dir" && rm -f $$files; }; \
   }
-DATA = $(dist_doc_DATA)
+DATA = $(dist_doc_DATA) $(systemdsystemunit_DATA)
 am__tagged_files = $(HEADERS) $(SOURCES) $(TAGS_FILES) $(LISP) \
 	config.h.in
 # Read a list of newline-separated strings from the standard input,
@@ -257,6 +260,9 @@ PACKAGE_TARNAME = @PACKAGE_TARNAME@
 PACKAGE_URL = @PACKAGE_URL@
 PACKAGE_VERSION = @PACKAGE_VERSION@
 PATH_SEPARATOR = @PATH_SEPARATOR@
+PKG_CONFIG = @PKG_CONFIG@
+PKG_CONFIG_LIBDIR = @PKG_CONFIG_LIBDIR@
+PKG_CONFIG_PATH = @PKG_CONFIG_PATH@
 SET_MAKE = @SET_MAKE@
 SHELL = @SHELL@
 STRIP = @STRIP@
@@ -299,18 +305,24 @@ sbindir = @sbindir@
 sharedstatedir = @sharedstatedir@
 srcdir = @srcdir@
 sysconfdir = @sysconfdir@
+systemdsystemunitdir = @systemdsystemunitdir@
 target_alias = @target_alias@
 top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 ACLOCAL_AMFLAGS = -I admin
-AM_CFLAGS = -Wall -Wextra -Wuninitialized -Wshadow
-
+AM_CFLAGS = -Wall -Wextra -Wuninitialized -Wshadow $(am__append_1)
+AM_LDFLAGS = -Wall -Wextra $(am__append_2)
 #     -Wunreachable-code -Wformat=2 \
 #     -D_FORTIFY_SOURCE=2 -fstack-protector --param ssp-buffer-size=4 \
 #     -fPIE -pie -Wl,-z,relro,-z,now
 dist_doc_DATA = README
 mapper_devusb_SOURCES = serial_speed.h mapper-devusb.c
+AM_DISTCHECK_CONFIGURE_FLAGS = \
+	--with-systemdsystemunitdir=$$dc_install_base/$(systemdsystemunitdir)
+
+EXTRA_DIST = mapper-devusb.service
+@HAVE_SYSTEMD_TRUE@systemdsystemunit_DATA = mapper-devusb.service
 all: config.h
 	$(MAKE) $(AM_MAKEFLAGS) all-am
 
@@ -461,6 +473,27 @@ uninstall-dist_docDATA:
 	@list='$(dist_doc_DATA)'; test -n "$(docdir)" || list=; \
 	files=`for p in $$list; do echo $$p; done | sed -e 's|^.*/||'`; \
 	dir='$(DESTDIR)$(docdir)'; $(am__uninstall_files_from_dir)
+install-systemdsystemunitDATA: $(systemdsystemunit_DATA)
+	@$(NORMAL_INSTALL)
+	@list='$(systemdsystemunit_DATA)'; test -n "$(systemdsystemunitdir)" || list=; \
+	if test -n "$$list"; then \
+	  echo " $(MKDIR_P) '$(DESTDIR)$(systemdsystemunitdir)'"; \
+	  $(MKDIR_P) "$(DESTDIR)$(systemdsystemunitdir)" || exit 1; \
+	fi; \
+	for p in $$list; do \
+	  if test -f "$$p"; then d=; else d="$(srcdir)/"; fi; \
+	  echo "$$d$$p"; \
+	done | $(am__base_list) | \
+	while read files; do \
+	  echo " $(INSTALL_DATA) $$files '$(DESTDIR)$(systemdsystemunitdir)'"; \
+	  $(INSTALL_DATA) $$files "$(DESTDIR)$(systemdsystemunitdir)" || exit $$?; \
+	done
+
+uninstall-systemdsystemunitDATA:
+	@$(NORMAL_UNINSTALL)
+	@list='$(systemdsystemunit_DATA)'; test -n "$(systemdsystemunitdir)" || list=; \
+	files=`for p in $$list; do echo $$p; done | sed -e 's|^.*/||'`; \
+	dir='$(DESTDIR)$(systemdsystemunitdir)'; $(am__uninstall_files_from_dir)
 
 ID: $(am__tagged_files)
 	$(am__define_uniq_tagged_files); mkid -fID $$unique
@@ -700,7 +733,7 @@ check-am: all-am
 check: check-am
 all-am: Makefile $(PROGRAMS) $(DATA) config.h
 installdirs:
-	for dir in "$(DESTDIR)$(bindir)" "$(DESTDIR)$(docdir)"; do \
+	for dir in "$(DESTDIR)$(bindir)" "$(DESTDIR)$(docdir)" "$(DESTDIR)$(systemdsystemunitdir)"; do \
 	  test -z "$$dir" || $(MKDIR_P) "$$dir"; \
 	done
 install: install-am
@@ -756,14 +789,15 @@ info: info-am
 
 info-am:
 
-install-data-am: install-dist_docDATA
+install-data-am: install-dist_docDATA install-systemdsystemunitDATA
 
 install-dvi: install-dvi-am
 
 install-dvi-am:
 
 install-exec-am: install-binPROGRAMS
-
+	@$(NORMAL_INSTALL)
+	$(MAKE) $(AM_MAKEFLAGS) install-exec-hook
 install-html: install-html-am
 
 install-html-am:
@@ -803,9 +837,10 @@ ps: ps-am
 
 ps-am:
 
-uninstall-am: uninstall-binPROGRAMS uninstall-dist_docDATA
+uninstall-am: uninstall-binPROGRAMS uninstall-dist_docDATA \
+	uninstall-systemdsystemunitDATA
 
-.MAKE: all install-am install-strip
+.MAKE: all install-am install-exec-am install-strip
 
 .PHONY: CTAGS GTAGS TAGS all all-am am--depfiles am--refresh check \
 	check-am clean clean-binPROGRAMS clean-cscope clean-generic \
@@ -816,17 +851,27 @@ uninstall-am: uninstall-binPROGRAMS uninstall-dist_docDATA
 	distdir distuninstallcheck dvi dvi-am html html-am info \
 	info-am install install-am install-binPROGRAMS install-data \
 	install-data-am install-dist_docDATA install-dvi \
-	install-dvi-am install-exec install-exec-am install-html \
-	install-html-am install-info install-info-am install-man \
-	install-pdf install-pdf-am install-ps install-ps-am \
-	install-strip installcheck installcheck-am installdirs \
-	maintainer-clean maintainer-clean-generic mostlyclean \
-	mostlyclean-compile mostlyclean-generic pdf pdf-am ps ps-am \
-	tags tags-am uninstall uninstall-am uninstall-binPROGRAMS \
-	uninstall-dist_docDATA
+	install-dvi-am install-exec install-exec-am install-exec-hook \
+	install-html install-html-am install-info install-info-am \
+	install-man install-pdf install-pdf-am install-ps \
+	install-ps-am install-strip install-systemdsystemunitDATA \
+	installcheck installcheck-am installdirs maintainer-clean \
+	maintainer-clean-generic mostlyclean mostlyclean-compile \
+	mostlyclean-generic pdf pdf-am ps ps-am tags tags-am uninstall \
+	uninstall-am uninstall-binPROGRAMS uninstall-dist_docDATA \
+	uninstall-systemdsystemunitDATA
 
 .PRECIOUS: Makefile
 
+
+install-exec-hook:
+	if [ `id -u` -eq 0 ]; then \
+		mkdir -p /var/log/mapper-devusb; \
+		chown www-data /var/log/mapper-devusb; \
+		rm -f /var/arduino; \
+		mkfifo /var/arduino; \
+		chmod a+w /var/arduino; \
+	fi
 
 dist-hook:
 	rm -rf `find $(distdir) -name .git`
