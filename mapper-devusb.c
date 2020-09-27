@@ -63,13 +63,16 @@
 
 #define VERSION "1.1"
 
-#define CONFFILE "mapper-devusb.conf"
-#define ABSOLUTE_CONFFILE SYSCONFDIR "/" CONFFILE
+#define DEFAULT_CONFFILE "mapper-devusb.conf"
+#define DEFAULT_ABSOLUTE_CONFFILE SYSCONFDIR "/" DEFAULT_CONFFILE
+
+#define DEFAULT_FIFO_FILE_NAME "/tmp/arduino"
 
     // Send a noop instruction to Arduino every that many seconds
 #define KEEP_ALIVE_WHILE_SUCCESS 60
 #define KEEP_ALIVE_WHILE_FAILURE 5
-    // Can result in a lot of repetitive logs
+    // Can result in a lot of repetitive logs, recommendation is to leave it
+    // commented out...
 #define LOG_NOOP
 
 int debug_on = 0;
@@ -83,8 +86,10 @@ int fifo_fd = -1;
     //   string of length 4095 [-Wstringop-truncation]
 #define MY_PATH_MAX (PATH_MAX + 1)
 
-#define DEFAULT_FIFO_FILE_NAME "/tmp/arduino"
-        // Typically: /tmp/arduino or /var/arduino
+    // Typically: DEFAULT_ABSOLUTE_CONFFILE, that is, by default:
+    //   /usr/local/etc/mapper-devusb.conf
+char abs_cfgfile[MY_PATH_MAX];
+    // Typically: /tmp/arduino or /var/arduino
 char fifo_file_name[MY_PATH_MAX];
     // Typically: /dev/ttyUSB0 or /dev/ttyACM0
 char dev_file_name[MY_PATH_MAX];
@@ -110,7 +115,7 @@ void output_datetime_of_day(FILE *f) {
         return;
     }
 
-    fprintf(f, "%02i/%02i/%02i %02i:%02i:%02i.%06lu  ",
+    fprintf(f, "%02i/%02i/%02i %02i:%02i:%02i.%06lu ",
             ts.tm_mday, ts.tm_mon + 1, ts.tm_year % 100,
             ts.tm_hour, ts.tm_min, ts.tm_sec, tv.tv_usec);
 }
@@ -126,7 +131,7 @@ void DBG(const char *fmt, ...) {
         return;
 
     output_datetime_of_day(flog);
-    fprintf(flog, "%s", "<D>  ");
+    fprintf(flog, "%s", "[D] ");
     va_list args;
     va_start(args, fmt);
     vfprintf(flog, fmt, args);
@@ -144,7 +149,7 @@ void l(const char *fmt, ...) {
         return;
 
     output_datetime_of_day(flog);
-    fprintf(flog, "%s", "<I>  ");
+    fprintf(flog, "%s", "    ");
     va_list args;
     va_start(args, fmt);
     vfprintf(flog, fmt, args);
@@ -161,19 +166,19 @@ everything to DEVICE_FILE.\n\
 In-between, control HUPCL flag of DEVICE_FILE, to prevent\n\
 an Arduino reset at each write.\n\
 \n\
-mapper-devusb will read the file " ABSOLUTE_CONFFILE 
-"\n\
 to set options. See file installed by default.\n\
 \n\
   -h       Print this help screen\n\
   -v       Print version information and quit\n\
-  -D       Print out debug information\n\
+  -c FILE  Read FILE for the configuration, default:\n\
+           " DEFAULT_ABSOLUTE_CONFFILE "\n\
   -d       Start as a daemon\n\
              *IMPORTANT*\n\
            This option implies old unix-style daemon execution (double\n\
            fork()). It is not compatible with systemd service management.\n\
   -l FILE  Logs data into FILE\n\
   -f FIFO  FIFO to use\n\
+  -D       Print out debug information\n\
 \n\
 Copyright 2019, 2020 Sébastien Millet\n");
 }
@@ -217,8 +222,7 @@ int clear_hupcl(const int fd) {
 int write_buf(char *buf, size_t len) {
     int out_fd;
     if ((out_fd = open(dev_file_name, O_WRONLY)) == -1) {
-        l("error: cannot open device file: %d (%s)",
-            errno, strerror(errno));
+        l("error: cannot open '%s': %s", dev_file_name, strerror(errno));
         return -1;
     }
 
@@ -226,7 +230,7 @@ int write_buf(char *buf, size_t len) {
     do {
         if (clear_hupcl(out_fd)) {
             l("error: cannot clear HUPCL of "
-                "device file: %d (%s)", errno, strerror(errno));
+                "'%s': %s", dev_file_name, strerror(errno));
             retval = -1;
             break;
         }
@@ -237,8 +241,7 @@ int write_buf(char *buf, size_t len) {
         }
 
         if (write(out_fd, buf, len) == -1) {
-            l("error: write to device file: %d (%s)",
-                errno, strerror(errno));
+            l("error: write to device file: %s", strerror(errno));
             retval = -1;
             break;
         }
@@ -340,8 +343,7 @@ int str_to_boolean(const char *s) {
 
 char *trim(char *s) {
     int p = strlen(s) - 1;
-    while (p >= 0 && (s[p] == '\n' || s[p] == '\r'
-                      || s[p] == ' ' || s[p] == '\t')) {
+    while (p >= 0 && (s[p] == ' ' || s[p] == '\t')) {
         s[p] = '\0';
         --p;
     }
@@ -350,10 +352,25 @@ char *trim(char *s) {
     return s;
 }
 
-void read_config_from_config_file() {
+void read_cfg_from_cmdline_opts_round1(int argc, char *argv[]) {
+    for (int i = 1; i < argc; ++i) {
+        if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
+            usage();
+            exit(0);
+        } else if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--version")) {
+            version();
+            exit(0);
+        } else if (!strcmp(argv[i], "-c")) {
+            get_required_argument(&i, argc, argv, "l",
+                abs_cfgfile, sizeof(abs_cfgfile));
+        }
+    }
+}
+
+void read_cfg_from_config_file() {
     FILE *config;
-    if ((config = fopen(ABSOLUTE_CONFFILE, "r")) == NULL) {
-        fprintf(stderr, "Error reading config file\n");
+    if ((config = fopen(abs_cfgfile, "r")) == NULL) {
+        fprintf(stderr, "%s: error: unable to open for reading\n", abs_cfgfile);
         exit(EXIT_FAILURE);
     } else {
         ssize_t nb;
@@ -363,7 +380,9 @@ void read_config_from_config_file() {
                                     // know what other constant I could use
                                     // instead.
         char *tmp_varval;
+        int line_no = 0;
         while ((nb = getline(&line, &z, config)) != -1) {
+            ++line_no;
 
             int idx;
             for (idx = 0; line[idx] != '\0'; ++idx) {
@@ -374,6 +393,8 @@ void read_config_from_config_file() {
                 continue;
 
             s_strncpy(tmp_varname, line, sizeof(tmp_varname));
+            remove_trailing_newline(tmp_varname);
+
             for (tmp_varval = tmp_varname; *tmp_varval != '\0'; ++tmp_varval) {
                 if (*tmp_varval == '=') {
                     *tmp_varval = '\0';
@@ -398,8 +419,8 @@ void read_config_from_config_file() {
             } else if (!strcmp(varname, "daemon")) {
                 run_as_a_daemon = str_to_boolean(varval);
             } else {
-                fprintf(stderr, "Error: file " ABSOLUTE_CONFFILE
-                    ": unknown variable '%s'\n", varname);
+                fprintf(stderr, "%s:%i: error: unknown variable '%s'\n",
+                    abs_cfgfile, line_no, varname);
                 exit(EXIT_FAILURE);
             }
         }
@@ -407,7 +428,7 @@ void read_config_from_config_file() {
             free(line);
 
         if (!feof(config)) {
-            fprintf(stderr, "Error reading config file\n");
+            fprintf(stderr, "%s: error reading\n", abs_cfgfile);
             exit(EXIT_FAILURE);
         }
 
@@ -416,14 +437,9 @@ void read_config_from_config_file() {
 
 }
 
-void read_config_from_command_line_options(int argc, char *argv[]) {
+void read_cfg_from_cmdline_opts_round2(int argc, char *argv[]) {
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "-D")) {
-#ifndef DEBUG
-            fprintf(stderr, "Error: compiled without debug "
-                    "support, cannot honor -D option\n");
-            exit(EXIT_FAILURE);
-#endif
             debug_on = 1;
         } else if (!strcmp(argv[i], "-d")) {
             run_as_a_daemon = 1;
@@ -433,6 +449,17 @@ void read_config_from_command_line_options(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "-f")) {
             get_required_argument(&i, argc, argv, "f",
                 fifo_file_name, sizeof(fifo_file_name));
+        } else if (!strcmp(argv[i], "-c")) {
+                // Option -c got already taken into account (in
+                // read_cfg_from_cmdline_opts_round1), but still, we must
+                // consider it to avoid an error 'unknown option'.
+            if (i >= argc - 1) {
+                    // Such a condition must have been dealt with in the call to
+                    // read_cfg_from_cmdline_opts_round1.
+                fprintf(stderr, "FATAL: %s:%i: inconsistent status!\n",
+                        __FILE__, __LINE__);
+            }
+            ++i;
         } else {
             s_strncpy(dev_file_name, argv[i], sizeof(dev_file_name));
             if (i != argc - 1) {
@@ -463,8 +490,7 @@ void infinite_loop() {
         retval = select(fifo_fd + 1, &rfds, NULL, NULL, &tv);
 
         if (retval == -1) {
-            l("error: select: %d (%s)",
-                errno, strerror(errno));
+            l("error: select: %s", strerror(errno));
             continue;
         } else if (retval == 0) {
 #ifdef LOG_NOOP
@@ -498,27 +524,37 @@ void infinite_loop() {
 }
 
 int main(int argc, char *argv[]) {
-
-
     flog = stderr;
 
+    s_strncpy(abs_cfgfile, DEFAULT_ABSOLUTE_CONFFILE,
+              sizeof(abs_cfgfile));
     s_strncpy(log_file_name, "", sizeof(log_file_name));
     s_strncpy(fifo_file_name, DEFAULT_FIFO_FILE_NAME, sizeof(fifo_file_name));
     s_strncpy(dev_file_name, "", sizeof(dev_file_name));
 
-    for (int i = 1; i < argc; ++i) {
-        if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
-            usage();
-            exit(0);
-        }
-        if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--version")) {
-            version();
-            exit(0);
-        }
-    }
+        // Command-line options parsing is done in 2 rounds because reading the
+        // config file can lead to error display (unknown option, missing config
+        // file etc.) and it makes no sense if option -h or -v is provided.
+        // Also obviously -c option must be parsed before config file reading.
+        //
+        // On the other hand, command-line options take precedence over config
+        // file therefore they are finally read *after* config file reading.
 
-    read_config_from_config_file();
-    read_config_from_command_line_options(argc, argv);
+        // Round 1: options that cause immediate stop (-h, -v) and option to
+        // enforce the configuration file (-c).
+    read_cfg_from_cmdline_opts_round1(argc, argv);
+    read_cfg_from_config_file();
+        // Round 2: all kinds of options, done after config file read as they
+        // take precedence.
+    read_cfg_from_cmdline_opts_round2(argc, argv);
+
+#ifndef DEBUG
+    if (debug_on) {
+        fprintf(stderr, "Error: compiled without debug support, "
+                "cannot honor -D option\n");
+        exit(EXIT_FAILURE);
+    }
+#endif
 
     if (!strlen(dev_file_name)) {
         fprintf(stderr, "Unknown device filename\n");
@@ -530,14 +566,14 @@ int main(int argc, char *argv[]) {
         flog = fopen(log_file_name, "a");
         if (flog == NULL) {
             fprintf(stderr, "Error: cannot open log file: "
-                "%d (%s)\n", errno, strerror(errno));
+                "%s\n", strerror(errno));
             exit(3);
         }
         setvbuf(flog, NULL, _IONBF, 0);
     }
 
     l("start");
-    DBG("config file:    [%s]", ABSOLUTE_CONFFILE);
+    DBG("config file:    [%s]", abs_cfgfile);
     DBG("debug on:       [%s]", (debug_on ? "yes" : "no"));
     DBG("device file:    [%s]", dev_file_name);
     DBG("fifo file name: [%s]", fifo_file_name);
@@ -549,17 +585,17 @@ int main(int argc, char *argv[]) {
     DBG("daemon mode:    [%s]", run_as_a_daemon ? "yes" : "no");
 
     if (access(fifo_file_name, R_OK ) != -1) {
-        l("server fifo '%s' already exists", fifo_file_name);
+        l("fifo '%s' already exists", fifo_file_name);
     } else if (mkfifo(fifo_file_name, 0600) == -1) {
-        l("warning: unable to create server fifo '%s'",
+        l("warning: unable to create fifo '%s'",
           fifo_file_name);
     } else {
-        l("created server fifo '%s'", fifo_file_name);
+        l("created fifo '%s'", fifo_file_name);
     }
 
     if ((fifo_fd = open(fifo_file_name, O_RDWR)) < 0) {
-        fprintf(stderr, "Error: unable to open server FIFO "
-            "'%s'", fifo_file_name);
+        fprintf(stderr, "Error: unable to open '%s': %s\n",
+                fifo_file_name, strerror(errno));
         exit(2);
     }
 
