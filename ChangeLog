@@ -1,3 +1,23 @@
+2020-09-27 Sébastien Millet <milletseb@laposte.net>
+
+	* Release 1.1 built.
+
+	* Can run as a systemd service.
+
+	* Uses a config file for options, allowing to tune service behavior
+	  without updating the service file. File is by default
+	    /usr/local/etc/mapper-devusb.conf
+
+	* Installer now creates user mapper-devusb that'll run the service.
+
+	* Installer creates directory /var/log/mapper-devusb where the file
+	  activity.log is mapper-devusb program log file.
+
+	* Normally (NOT TESTED), relies on autotools variables so that if the
+	  executable is installed in a different directory (different from the
+	  default /usr/local/bin), the service file gets updated accordingly, and
+	  *gracefully*.
+
 2020-09-21 Sébastien Millet <milletseb@laposte.net>
 
-	* Release 1.0 built
+	* Release 1.0 built.
