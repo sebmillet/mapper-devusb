@@ -69,8 +69,8 @@
 #define DEFAULT_FIFO_FILE_NAME "/tmp/arduino"
 
     // Send a noop instruction to Arduino every that many seconds
-#define KEEP_ALIVE_WHILE_SUCCESS 60
-#define KEEP_ALIVE_WHILE_FAILURE 5
+#define KEEPALIVE_WHILE_SUCCESS 60
+#define KEEPALIVE_WHILE_FAILURE 5
 #define LOG_KEEPALIVE_NEVER  0
 #define LOG_KEEPALIVE_ERROR  1
 #define LOG_KEEPALIVE_ALWAYS 2
@@ -80,6 +80,7 @@ const char *KEEPALIVE_CMD = "noop\n";
 
 int debug_on = 0;
 int run_as_a_daemon = 0;
+int log_usec = 0;
 int fifo_fd = -1;
 
     // PATH_MAX + 1 to avoid warnings while compiling 'fortified'.
@@ -118,9 +119,15 @@ void output_datetime_of_day(FILE *f) {
         return;
     }
 
-    fprintf(f, "%02i/%02i/%02i %02i:%02i:%02i.%06lu ",
-            ts.tm_mday, ts.tm_mon + 1, ts.tm_year % 100,
-            ts.tm_hour, ts.tm_min, ts.tm_sec, tv.tv_usec);
+    if (log_usec) {
+        fprintf(f, "%02i/%02i/%02i %02i:%02i:%02i.%06lu ",
+                ts.tm_mday, ts.tm_mon + 1, ts.tm_year % 100,
+                ts.tm_hour, ts.tm_min, ts.tm_sec, tv.tv_usec);
+    } else {
+        fprintf(f, "%02i/%02i/%02i %02i:%02i:%02i ",
+                ts.tm_mday, ts.tm_mon + 1, ts.tm_year % 100,
+                ts.tm_hour, ts.tm_min, ts.tm_sec);
+    }
 }
 
 void DBG(const char *fmt, ...)
@@ -384,7 +391,7 @@ void read_cfg_from_config_file() {
     } else {
         ssize_t nb;
         size_t z = 0;
-        char *line;
+        char *line = NULL;
         char tmp_varname[PATH_MAX]; // PATH_MAX might look weird here... Don't
                                     // know what other constant I could use
                                     // instead.
@@ -440,6 +447,8 @@ void read_cfg_from_config_file() {
                         "'never')\n", abs_cfgfile, line_no, varval);
                     exit(EXIT_FAILURE);
                 }
+            } else if (!strcmp(varname, "log_usec")) {
+                log_usec = str_to_boolean(varval);
             } else {
                 fprintf(stderr, "%s:%i: error: unknown variable '%s'\n",
                     abs_cfgfile, line_no, varname);
@@ -506,8 +515,8 @@ void infinite_loop() {
         FD_ZERO(&rfds);
         FD_SET(fifo_fd, &rfds);
         tv.tv_sec = (last_write_buf_result == 0 ?
-                       KEEP_ALIVE_WHILE_SUCCESS :
-                       KEEP_ALIVE_WHILE_FAILURE);
+                       KEEPALIVE_WHILE_SUCCESS :
+                       KEEPALIVE_WHILE_FAILURE);
         tv.tv_usec = 0;
 
         retval = select(fifo_fd + 1, &rfds, NULL, NULL, &tv);
