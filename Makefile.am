@@ -32,8 +32,10 @@ endif
 
 install-exec-hook:
 	if [ `id -u` -eq 0 ]; then \
+		useradd -d '/' -M -s /usr/sbin/nologin -G dialout mapper-devusb; \
+		usermod -L mapper-devusb; \
 		mkdir -p /var/log/mapper-devusb; \
-		chown www-data /var/log/mapper-devusb; \
+		chown mapper-devusb /var/log/mapper-devusb; \
 		rm -f /var/arduino; \
 		mkfifo /var/arduino; \
 		chmod a+w /var/arduino; \
