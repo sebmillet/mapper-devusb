@@ -71,9 +71,12 @@
     // Send a noop instruction to Arduino every that many seconds
 #define KEEP_ALIVE_WHILE_SUCCESS 60
 #define KEEP_ALIVE_WHILE_FAILURE 5
-    // Can result in a lot of repetitive logs, recommendation is to leave it
-    // commented out...
-#define LOG_NOOP
+#define LOG_KEEPALIVE_NEVER  0
+#define LOG_KEEPALIVE_ERROR  1
+#define LOG_KEEPALIVE_ALWAYS 2
+int log_keepalive = LOG_KEEPALIVE_ERROR;
+    // Keepalive instruction
+const char *KEEPALIVE_CMD = "noop\n";
 
 int debug_on = 0;
 int run_as_a_daemon = 0;
@@ -219,18 +222,22 @@ int clear_hupcl(const int fd) {
 
 // Sends bytes to the device.
 // Returns 0 if success, -1 if failure.
-int write_buf(char *buf, size_t len) {
+int write_buf(const char *buf, size_t len, int stay_silent_if_error) {
     int out_fd;
     if ((out_fd = open(dev_file_name, O_WRONLY)) == -1) {
-        l("error: cannot open '%s': %s", dev_file_name, strerror(errno));
+        if (!stay_silent_if_error) {
+            l("error: cannot open '%s': %s", dev_file_name, strerror(errno));
+        }
         return -1;
     }
 
     int retval = 0;
     do {
         if (clear_hupcl(out_fd)) {
-            l("error: cannot clear HUPCL of "
-                "'%s': %s", dev_file_name, strerror(errno));
+            if (!stay_silent_if_error) {
+                l("error: cannot clear HUPCL of "
+                  "'%s': %s", dev_file_name, strerror(errno));
+            }
             retval = -1;
             break;
         }
@@ -241,7 +248,9 @@ int write_buf(char *buf, size_t len) {
         }
 
         if (write(out_fd, buf, len) == -1) {
-            l("error: write to device file: %s", strerror(errno));
+            if (!stay_silent_if_error) {
+                l("error: write to device file: %s", strerror(errno));
+            }
             retval = -1;
             break;
         }
@@ -418,6 +427,19 @@ void read_cfg_from_config_file() {
                 debug_on = str_to_boolean(varval);
             } else if (!strcmp(varname, "daemon")) {
                 run_as_a_daemon = str_to_boolean(varval);
+            } else if (!strcmp(varname, "log_keepalive")) {
+                if (!strcmp(varval, "always")) {
+                    log_keepalive = LOG_KEEPALIVE_ALWAYS;
+                } else if (!strcmp(varval, "error")) {
+                    log_keepalive = LOG_KEEPALIVE_ERROR;
+                } else if (!strcmp(varval, "never")) {
+                    log_keepalive = LOG_KEEPALIVE_NEVER;
+                } else {
+                    fprintf(stderr, "%s:%i: error: log_keepalive: unknown "
+                        "value '%s' (choose one of 'always', 'error', "
+                        "'never')\n", abs_cfgfile, line_no, varval);
+                    exit(EXIT_FAILURE);
+                }
             } else {
                 fprintf(stderr, "%s:%i: error: unknown variable '%s'\n",
                     abs_cfgfile, line_no, varname);
@@ -454,10 +476,11 @@ void read_cfg_from_cmdline_opts_round2(int argc, char *argv[]) {
                 // read_cfg_from_cmdline_opts_round1), but still, we must
                 // consider it to avoid an error 'unknown option'.
             if (i >= argc - 1) {
-                    // Such a condition must have been dealt with in the call to
-                    // read_cfg_from_cmdline_opts_round1.
-                fprintf(stderr, "FATAL: %s:%i: inconsistent status!\n",
+                    // Such a condition should have been dealt with in the call
+                    // to read_cfg_from_cmdline_opts_round1.
+                fprintf(stderr, "FATAL: %s:%i: INCONSISTENT STATUS!\n",
                         __FILE__, __LINE__);
+                exit(EXIT_FAILURE);
             }
             ++i;
         } else {
@@ -493,11 +516,13 @@ void infinite_loop() {
             l("error: select: %s", strerror(errno));
             continue;
         } else if (retval == 0) {
-#ifdef LOG_NOOP
-            l("sending noop()");
-#endif
-
-            last_write_buf_result = write_buf("noop\n", 5);
+            if (log_keepalive == LOG_KEEPALIVE_ALWAYS) {
+                l("sending keepalive instruction (noop)");
+            }
+            int stay_silent_if_error = (log_keepalive == LOG_KEEPALIVE_NEVER);
+            last_write_buf_result =
+                write_buf(KEEPALIVE_CMD, strlen(KEEPALIVE_CMD),
+                          stay_silent_if_error);
             continue;
         }
 
@@ -516,7 +541,7 @@ void infinite_loop() {
                 l("quitting");
                 break;
             } else {
-                last_write_buf_result = write_buf(buf, len);
+                last_write_buf_result = write_buf(buf, len, 0);
             }
         }
     }
