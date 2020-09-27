@@ -13,6 +13,8 @@ mapper_devusb_SOURCES=serial_speed.h mapper-devusb.c
 AM_DISTCHECK_CONFIGURE_FLAGS=\
 	--with-systemdsystemunitdir=$$dc_install_base/$(systemdsystemunitdir)
 
+dist_sysconf_DATA=mapper-devusb.conf
+
 EXTRA_DIST=mapper-devusb.service.in
 
 CLEANFILES=mapper-devusb.service
